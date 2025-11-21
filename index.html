@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workout Tracker</title>
+    <style>
+        :root {
+            --bg: #121212;
+            --card-bg: #1e1e1e;
+            --text: #e0e0e0;
+            --border: #333333;
+            --accent: #4dabf7;
+            --danger: #e03131;
+        }
+
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); padding: 20px; margin: 0; }
+        
+        /* Controls */
+        .top-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; background: var(--card-bg); padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+        
+        /* Dark Mode Inputs */
+        select, input, textarea { 
+            padding: 8px; 
+            border: 1px solid var(--border); 
+            border-radius: 4px; 
+            font-size: 14px; 
+            background-color: #2c2c2c; 
+            color: var(--text); 
+        }
+
+        /* Buttons */
+        button { cursor: pointer; background: #333; color: var(--text); border: 1px solid var(--border); }
+        button:hover { background: #444; }
+        .btn-primary { background: var(--accent); color: #121212; border: none; font-weight: bold; }
+        .btn-primary:hover { background: #3b8ac4; }
+        .btn-danger { background: var(--danger); color: white; border: none; }
+        .btn-danger:hover { background: #c92a2a; }
+        .btn-sm { padding: 4px 8px; font-size: 12px; }
+
+        /* Layout */
+        .day-container { background: var(--card-bg); padding: 20px; margin-bottom: 20px; border-radius: 8px; border-left: 5px solid var(--accent); box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        .day-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        
+        .exercise-card { border: 1px solid var(--border); padding: 15px; margin-bottom: 15px; border-radius: 6px; background: #252525; }
+        .exercise-header { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
+        .exercise-header select { width: 120px; }
+        .exercise-header input[type="text"] { flex-grow: 1; font-weight: bold; }
+        
+        .prev-week-stats { font-size: 0.85em; color: #aaa; margin-bottom: 10px; font-style: italic; background: #333; padding: 5px; border-radius: 4px; display: none; }
+        .prev-week-stats.visible { display: block; }
+
+        /* Sets Grid */
+        .sets-header, .set-row { display: grid; grid-template-columns: 40px 1fr 1fr 1fr 40px; gap: 5px; align-items: center; margin-bottom: 5px; text-align: center; }
+        .sets-header { font-size: 0.8em; font-weight: bold; color: #888; }
+        .set-row input { width: 100%; text-align: center; box-sizing: border-box; }
+        
+        .notes-area { width: 100%; box-sizing: border-box; margin-top: 10px; min-height: 60px; resize: vertical; }
+        
+        /* Modal */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); justify-content: center; align-items: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: #1e1e1e; padding: 20px; border-radius: 8px; width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto; border: 1px solid #444; }
+        .history-item { border-bottom: 1px solid #333; padding: 10px 0; }
+        .history-date { font-weight: bold; color: var(--accent); }
+        .history-notes { background: #333; padding: 5px; font-style: italic; margin-top: 5px; font-size: 0.9em; color: #ccc; }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="top-bar">
+    <label>Current Week:</label>
+    <select id="weekSelector"></select>
+    <button class="btn-primary" onclick="generateNextWeek()">+ New Week</button>
+    <button onclick="exportData()">Backup Data</button>
+    <div style="flex-grow:1"></div>
+    <button class="btn-danger" onclick="hardReset()">Reset App</button>
+</div>
+
+<div id="app"></div>
+
+<div id="historyModal" class="modal">
+    <div class="modal-content">
+        <h2 id="modalTitle" style="margin-top:0">Exercise History</h2>
+        <div id="modalBody"></div>
+        <br>
+        <button onclick="closeModal()" style="width:100%">Close</button>
+    </div>
+</div>
+
+<script>
+    // --- Constants ---
+    const BODY_PARTS = ['Select...', 'Chest', 'Back', 'Quads', 'Hamstrings', 'Biceps', 'Triceps', 'Shoulders'];
+    
+    // --- State Management ---
+    let data = JSON.parse(localStorage.getItem('workoutData')) || {
+        weeks: [],
+        exerciseHistory: [] 
+    };
+
+    if (data.weeks.length === 0) {
+        createInitialWeek();
+    }
+
+    let currentWeekIndex = data.weeks.length - 1;
+
+    // --- Core Logic ---
+
+    function save() {
+        localStorage.setItem('workoutData', JSON.stringify(data));
+    }
+
+    function createInitialWeek() {
+        const newWeek = {
+            id: Date.now(),
+            name: "Week 1",
+            days: []
+        };
+        for (let i = 1; i <= 3; i++) {
+            newWeek.days.push(createDay(`Day ${i}`));
+        }
+        data.weeks.push(newWeek);
+        save();
+    }
+
+    function createDay(name) {
+        const day = {
+            id: Date.now() + Math.random(),
+            name: name,
+            exercises: []
+        };
+        for (let i = 0; i < 5; i++) {
+            day.exercises.push(createExercise());
+        }
+        return day;
+    }
+
+    function createExercise() {
+        return {
+            id: Date.now() + Math.random(),
+            bodyPart: BODY_PARTS[0],
+            name: "",
+            sets: [createSet(), createSet(), createSet()],
+            notes: ""
+        };
+    }
+
+    function createSet() {
+        return { weight: "", reps: "", rir: "" };
+    }
+
+    function generateNextWeek() {
+        const lastWeek = data.weeks[data.weeks.length - 1];
+        const newWeekIndex = data.weeks.length + 1;
+        const newWeek = JSON.parse(JSON.stringify(lastWeek));
+        
+        newWeek.id = Date.now();
+        newWeek.name = `Week ${newWeekIndex}`;
+        
+        newWeek.days.forEach(day => {
+            day.exercises.forEach(ex => {
+                ex.sets.forEach(set => {
+                    set.weight = "";
+                    set.reps = "";
+                    set.rir = "";
+                });
+                ex.notes = ""; 
+            });
+        });
+
+        data.weeks.push(newWeek);
+        currentWeekIndex = data.weeks.length - 1;
+        save();
+        render();
+    }
+
+    // --- Render Logic ---
+
+    function render() {
+        const app = document.getElementById('app');
+        app.innerHTML = '';
+        updateWeekSelector();
+        // We no longer update a global datalist here, we do it per-exercise below
+
+        const week = data.weeks[currentWeekIndex];
+
+        week.days.forEach((day, dayIndex) => {
+            const dayDiv = document.createElement('div');
+            dayDiv.className = 'day-container';
+            
+            let html = `
+                <div class="day-header">
+                    <input type="text" value="${day.name}" onchange="updateDayName(${dayIndex}, this.value)" style="font-weight:bold; border:none; background:transparent; font-size:1.2em">
+                    <div>
+                        <button class="btn-sm btn-danger" onclick="removeDay(${dayIndex})">Delete Day</button>
+                    </div>
+                </div>
+                <div id="exercises-day-${dayIndex}"></div>
+                <button class="btn-sm" onclick="addExercise(${dayIndex})" style="margin-top:10px; width:100%">+ Add Exercise</button>
+            `;
+            dayDiv.innerHTML = html;
+            app.appendChild(dayDiv);
+
+            const exContainer = dayDiv.querySelector(`#exercises-day-${dayIndex}`);
+            
+            day.exercises.forEach((ex, exIndex) => {
+                const prevStats = getPreviousStats(ex.name, currentWeekIndex);
+                
+                // Get Filtered Exercises for this specific Body Part
+                const relevantExercises = getUniqueExercisesForBodyPart(ex.bodyPart);
+                const uniqueListId = `list-${dayIndex}-${exIndex}`;
+                const datalistHtml = `
+                    <datalist id="${uniqueListId}">
+                        ${relevantExercises.map(name => `<option value="${name}">`).join('')}
+                    </datalist>
+                `;
+
+                const exCard = document.createElement('div');
+                exCard.className = 'exercise-card';
+                
+                const options = BODY_PARTS.map(bp => `<option value="${bp}" ${ex.bodyPart === bp ? 'selected' : ''}>${bp}</option>`).join('');
+                
+                let setsHtml = '';
+                ex.sets.forEach((set, setIndex) => {
+                    setsHtml += `
+                        <div class="set-row">
+                            <span>${setIndex + 1}</span>
+                            <input type="number" placeholder="Lbs" value="${set.weight}" onchange="updateSet(${dayIndex}, ${exIndex}, ${setIndex}, 'weight', this.value)">
+                            <input type="number" placeholder="Reps" value="${set.reps}" onchange="updateSet(${dayIndex}, ${exIndex}, ${setIndex}, 'reps', this.value)">
+                            <input type="number" placeholder="RIR" value="${set.rir}" onchange="updateSet(${dayIndex}, ${exIndex}, ${setIndex}, 'rir', this.value)">
+                            <button class="btn-danger btn-sm" onclick="removeSet(${dayIndex}, ${exIndex}, ${setIndex})">x</button>
+                        </div>
+                    `;
+                });
+
+                // Note the onchange for select now calls updateBodyPart which triggers a re-render
+                exCard.innerHTML = `
+                    ${datalistHtml}
+                    <div class="exercise-header">
+                        <select onchange="updateBodyPart(${dayIndex}, ${exIndex}, this.value)">${options}</select>
+                        <input type="text" list="${uniqueListId}" placeholder="Exercise Name" value="${ex.name}" onchange="updateExerciseName(${dayIndex}, ${exIndex}, this.value)">
+                        <button class="btn-sm" onclick="showHistory('${ex.name.replace(/'/g, "\\'")}')">History</button>
+                        <button class="btn-danger btn-sm" onclick="removeExercise(${dayIndex}, ${exIndex})">Delete</button>
+                    </div>
+                    
+                    <div class="prev-week-stats ${prevStats ? 'visible' : ''}">
+                        Last Week: ${prevStats}
+                    </div>
+
+                    <div class="sets-header">
+                        <span>Set</span><span>Weight</span><span>Reps</span><span>RIR</span><span></span>
+                    </div>
+                    <div id="sets-container-${day.id}-${ex.id}">
+                        ${setsHtml}
+                    </div>
+                    <button class="btn-sm" style="margin-top:5px" onclick="addSet(${dayIndex}, ${exIndex})">+ Set</button>
+                    
+                    <textarea class="notes-area" placeholder="Notes..." onchange="updateExercise(${dayIndex}, ${exIndex}, 'notes', this.value)">${ex.notes}</textarea>
+                `;
+                exContainer.appendChild(exCard);
+            });
+        });
+
+        const addDayBtn = document.createElement('button');
+        addDayBtn.innerText = "+ Add Day";
+        addDayBtn.className = "btn-primary";
+        addDayBtn.style.marginTop = "20px";
+        addDayBtn.onclick = addDay;
+        app.appendChild(addDayBtn);
+    }
+
+    // --- Helpers ---
+
+    function getUniqueExercisesForBodyPart(part) {
+        if(!part || part === 'Select...') return [];
+        const names = new Set();
+        data.weeks.forEach(w => w.days.forEach(d => d.exercises.forEach(e => {
+            if(e.bodyPart === part && e.name) {
+                names.add(e.name);
+            }
+        })));
+        return Array.from(names).sort();
+    }
+
+    function getPreviousStats(exName, currentIdx) {
+        if (!exName || currentIdx === 0) return null;
+        const prevWeek = data.weeks[currentIdx - 1];
+        if (!prevWeek) return null;
+        
+        for (let d of prevWeek.days) {
+            for (let e of d.exercises) {
+                if (e.name.toLowerCase() === exName.toLowerCase()) {
+                    const stats = e.sets.map(s => `${s.weight}x${s.reps}`).join(', ');
+                    return stats;
+                }
+            }
+        }
+        return null;
+    }
+
+    function updateWeekSelector() {
+        const sel = document.getElementById('weekSelector');
+        sel.innerHTML = data.weeks.map((w, i) => `<option value="${i}" ${i === currentWeekIndex ? 'selected' : ''}>${w.name}</option>`).join('');
+        sel.onchange = (e) => {
+            currentWeekIndex = parseInt(e.target.value);
+            render();
+        };
+    }
+
+    // --- Actions ---
+
+    function updateDayName(dIdx, val) {
+        data.weeks[currentWeekIndex].days[dIdx].name = val;
+        save();
+    }
+
+    function addDay() {
+        data.weeks[currentWeekIndex].days.push(createDay(`Day ${data.weeks[currentWeekIndex].days.length + 1}`));
+        save(); render();
+    }
+
+    function removeDay(dIdx) {
+        if(confirm('Delete this day?')) {
+            data.weeks[currentWeekIndex].days.splice(dIdx, 1);
+            save(); render();
+        }
+    }
+
+    function addExercise(dIdx) {
+        data.weeks[currentWeekIndex].days[dIdx].exercises.push(createExercise());
+        save(); render();
+    }
+
+    function removeExercise(dIdx, eIdx) {
+        data.weeks[currentWeekIndex].days[dIdx].exercises.splice(eIdx, 1);
+        save(); render();
+    }
+
+    function updateExerciseName(dIdx, eIdx, val) {
+        data.weeks[currentWeekIndex].days[dIdx].exercises[eIdx].name = val;
+        save(); 
+        render();
+    }
+
+    // New function to handle body part changes specifically
+    function updateBodyPart(dIdx, eIdx, val) {
+        data.weeks[currentWeekIndex].days[dIdx].exercises[eIdx].bodyPart = val;
+        save();
+        render(); // Re-render to generate the correct datalist options
+    }
+
+    function updateExercise(dIdx, eIdx, field, val) {
+        data.weeks[currentWeekIndex].days[dIdx].exercises[eIdx][field] = val;
+        save();
+    }
+
+    function addSet(dIdx, eIdx) {
+        data.weeks[currentWeekIndex].days[dIdx].exercises[eIdx].sets.push(createSet());
+        save(); render();
+    }
+
+    function removeSet(dIdx, eIdx, sIdx) {
+        data.weeks[currentWeekIndex].days[dIdx].exercises[eIdx].sets.splice(sIdx, 1);
+        save(); render();
+    }
+
+    function updateSet(dIdx, eIdx, sIdx, field, val) {
+        data.weeks[currentWeekIndex].days[dIdx].exercises[eIdx].sets[sIdx][field] = val;
+        save();
+    }
+
+    function showHistory(exName) {
+        if (!exName) return alert("Enter an exercise name first.");
+        const modal = document.getElementById('historyModal');
+        const title = document.getElementById('modalTitle');
+        const body = document.getElementById('modalBody');
+        
+        title.innerText = `History: ${exName}`;
+        body.innerHTML = '';
+        
+        data.weeks.forEach(w => {
+            w.days.forEach(d => {
+                d.exercises.forEach(e => {
+                    if (e.name.toLowerCase() === exName.toLowerCase()) {
+                        const hasData = e.sets.some(s => s.weight || s.reps);
+                        if (hasData) {
+                            const setStr = e.sets.map(s => `${s.weight || 0}lbs x ${s.reps || 0}`).join(', ');
+                            const notes = e.notes ? `<div class="history-notes">Note: ${e.notes}</div>` : '';
+                            
+                            body.innerHTML += `
+                                <div class="history-item">
+                                    <div class="history-date">${w.name} - ${d.name}</div>
+                                    <div>${setStr}</div>
+                                    ${notes}
+                                </div>
+                            `;
+                        }
+                    }
+                });
+            });
+        });
+
+        modal.classList.add('active');
+    }
+
+    function closeModal() {
+        document.getElementById('historyModal').classList.remove('active');
+    }
+
+    function exportData() {
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type : 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'workout_backup.json';
+        a.click();
+    }
+
+    function hardReset() {
+        if(confirm("This will delete ALL data. Are you sure?")) {
+            localStorage.removeItem('workoutData');
+            location.reload();
+        }
+    }
+
+    // Start
+    render();
+
+</script>
+</body>
+</html>
