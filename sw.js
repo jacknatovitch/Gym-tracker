@@ -3,8 +3,7 @@ const ASSETS = [
   './',
   './index.html',
   './manifest.json',
-  'https://img.icons8.com/ios-filled/192/ffffff/dumbbell.png',
-  'https://img.icons8.com/ios-filled/512/ffffff/dumbbell.png'
+  './icon.png'
 ];
 
 // Install event: Cache files
