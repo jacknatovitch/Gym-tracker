@@ -24,7 +24,6 @@
             --success: #40c057;
         }
 
-        /* Disable pull-to-refresh and bounce on mobile */
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
             background: var(--bg); 
@@ -41,7 +40,7 @@
             padding: 8px; 
             border: 1px solid var(--border); 
             border-radius: 4px; 
-            font-size: 16px; /* Prevents iOS zoom */
+            font-size: 16px; 
             background-color: #2c2c2c; 
             color: var(--text); 
         }
@@ -62,6 +61,9 @@
         .exercise-header select { width: 120px; }
         .exercise-header input[type="text"] { flex-grow: 1; font-weight: bold; }
         
+        /* Reorder Controls */
+        .card-controls { display: flex; gap: 5px; margin-left: auto; }
+        
         .prev-week-stats { font-size: 0.85em; color: #aaa; margin-bottom: 10px; font-style: italic; background: #333; padding: 5px; border-radius: 4px; display: none; }
         .prev-week-stats.visible { display: block; }
 
@@ -72,15 +74,18 @@
         
         .notes-area { width: 100%; box-sizing: border-box; margin-top: 10px; min-height: 60px; resize: vertical; }
         
-        /* Modal */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 1000; }
+        /* Modals */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 1000; }
         .modal.active { display: flex; }
         .modal-content { background: #1e1e1e; padding: 20px; border-radius: 8px; width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto; border: 1px solid #444; }
+        
         .history-item { border-bottom: 1px solid #333; padding: 10px 0; }
         .history-date { font-weight: bold; color: var(--accent); }
         .history-notes { background: #333; padding: 5px; font-style: italic; margin-top: 5px; font-size: 0.9em; color: #ccc; }
 
-        /* Autocomplete Datalist Styling */
+        .modal-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+        .modal-actions button { padding: 12px; }
+
         datalist { background-color: #2c2c2c; color: white; }
     </style>
 </head>
@@ -89,10 +94,15 @@
 <div class="top-bar">
     <label>Week:</label>
     <select id="weekSelector"></select>
-    <button class="btn-primary" onclick="generateNextWeek()">+ New Week</button>
+    <button class="btn-sm btn-danger" onclick="deleteCurrentWeek()" style="margin-left: 5px;">Del</button>
+    <button class="btn-primary" onclick="openNewWeekModal()">+ New Week</button>
+    
     <button onclick="exportData()">Backup</button>
+    <button onclick="document.getElementById('importFile').click()">Import</button>
+    <input type="file" id="importFile" hidden onchange="importData(this)">
+    
     <div style="flex-grow:1"></div>
-    <button class="btn-danger" onclick="hardReset()">Reset</button>
+    <button class="btn-danger" onclick="hardReset()">Reset App</button>
 </div>
 
 <div id="app"></div>
@@ -102,7 +112,21 @@
         <h2 id="modalTitle" style="margin-top:0">History</h2>
         <div id="modalBody"></div>
         <br>
-        <button onclick="closeModal()" style="width:100%">Close</button>
+        <button onclick="closeModal('historyModal')" style="width:100%">Close</button>
+    </div>
+</div>
+
+<div id="newWeekModal" class="modal">
+    <div class="modal-content">
+        <h2 style="margin-top:0">Start New Week</h2>
+        <label>Week Title:</label>
+        <input type="text" id="newWeekTitle" style="width:100%; box-sizing:border-box; margin-top:5px; padding:10px; margin-bottom:15px;">
+        
+        <div class="modal-actions">
+            <button class="btn-primary" onclick="confirmNewWeek('copy')">Copy Previous Routine</button>
+            <button onclick="confirmNewWeek('blank')">Start Blank (New Block)</button>
+            <button class="btn-danger" onclick="closeModal('newWeekModal')">Cancel</button>
+        </div>
     </div>
 </div>
 
@@ -120,7 +144,9 @@
         createInitialWeek();
     }
 
+    // Safe Index Check
     let currentWeekIndex = data.weeks.length - 1;
+    if (currentWeekIndex < 0) currentWeekIndex = 0;
 
     // --- Core Logic ---
 
@@ -167,30 +193,92 @@
         return { weight: "", reps: "", rir: "" };
     }
 
-    function generateNextWeek() {
-        const lastWeek = data.weeks[data.weeks.length - 1];
-        const newWeekIndex = data.weeks.length + 1;
-        
-        const newWeek = JSON.parse(JSON.stringify(lastWeek));
-        
-        newWeek.id = Date.now();
-        newWeek.name = `Week ${newWeekIndex}`;
-        
-        newWeek.days.forEach(day => {
-            day.exercises.forEach(ex => {
-                ex.sets.forEach(set => {
-                    set.weight = "";
-                    set.reps = "";
-                    set.rir = "";
+    // --- Week Management ---
+
+    function openNewWeekModal() {
+        const nextNum = data.weeks.length + 1;
+        document.getElementById('newWeekTitle').value = `Week ${nextNum}`;
+        document.getElementById('newWeekModal').classList.add('active');
+    }
+
+    function confirmNewWeek(mode) {
+        const title = document.getElementById('newWeekTitle').value || `Week ${data.weeks.length + 1}`;
+        let newWeek;
+
+        if (mode === 'blank') {
+            newWeek = { id: Date.now(), name: title, days: [] };
+            for (let i = 1; i <= 3; i++) newWeek.days.push(createDay(`Day ${i}`));
+        } else {
+            const lastWeek = data.weeks[data.weeks.length - 1];
+            newWeek = JSON.parse(JSON.stringify(lastWeek));
+            newWeek.id = Date.now();
+            newWeek.name = title;
+            newWeek.days.forEach(day => {
+                day.exercises.forEach(ex => {
+                    ex.sets.forEach(set => { set.weight = ""; set.reps = ""; set.rir = ""; });
+                    ex.notes = ""; 
                 });
-                ex.notes = ""; 
             });
-        });
+        }
 
         data.weeks.push(newWeek);
         currentWeekIndex = data.weeks.length - 1;
         save();
+        closeModal('newWeekModal');
         render();
+    }
+
+    function deleteCurrentWeek() {
+        if (data.weeks.length <= 1) {
+            alert("You cannot delete the only week. Reset the app if you want a fresh start.");
+            return;
+        }
+        if (confirm(`Are you sure you want to delete ${data.weeks[currentWeekIndex].name}?`)) {
+            data.weeks.splice(currentWeekIndex, 1);
+            // Adjust index
+            if (currentWeekIndex >= data.weeks.length) {
+                currentWeekIndex = data.weeks.length - 1;
+            }
+            save();
+            render();
+        }
+    }
+
+    // --- Import / Export ---
+
+    function exportData() {
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type : 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `workout_backup_${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+    }
+
+    function importData(input) {
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const imported = JSON.parse(e.target.result);
+                if (!imported.weeks || !Array.isArray(imported.weeks)) {
+                    alert("Invalid file format.");
+                    return;
+                }
+                if (confirm("Overwrite current data?")) {
+                    data = imported;
+                    currentWeekIndex = data.weeks.length - 1;
+                    save();
+                    render();
+                    alert("Import successful!");
+                }
+            } catch (err) {
+                alert("Error reading file: " + err);
+            }
+        };
+        reader.readAsText(file);
+        input.value = '';
     }
 
     // --- Render Logic ---
@@ -200,6 +288,10 @@
         app.innerHTML = '';
         updateWeekSelector();
 
+        // Safety check
+        if (!data.weeks[currentWeekIndex]) {
+            currentWeekIndex = data.weeks.length - 1;
+        }
         const week = data.weeks[currentWeekIndex];
 
         week.days.forEach((day, dayIndex) => {
@@ -224,7 +316,6 @@
             day.exercises.forEach((ex, exIndex) => {
                 const prevStats = getPreviousStats(ex.name, currentWeekIndex);
                 
-                // Dynamic Datalist Logic
                 const relevantExercises = getUniqueExercisesForBodyPart(ex.bodyPart);
                 const uniqueListId = `list-${day.id}-${ex.id}`;
                 const datalistHtml = `
@@ -251,13 +342,22 @@
                     `;
                 });
 
+                // Reorder Buttons Logic
+                const isFirst = exIndex === 0;
+                const isLast = exIndex === day.exercises.length - 1;
+                
                 exCard.innerHTML = `
                     ${datalistHtml}
                     <div class="exercise-header">
                         <select onchange="updateBodyPart(${dayIndex}, ${exIndex}, this.value)">${options}</select>
                         <input type="text" list="${uniqueListId}" placeholder="Exercise Name" value="${ex.name}" onchange="updateExerciseName(${dayIndex}, ${exIndex}, this.value)">
-                        <button class="btn-sm" onclick="showHistory('${ex.name.replace(/'/g, "\\'")}')">History</button>
-                        <button class="btn-danger btn-sm" onclick="removeExercise(${dayIndex}, ${exIndex})">Delete</button>
+                        
+                        <div class="card-controls">
+                            <button class="btn-sm" onclick="moveExercise(${dayIndex}, ${exIndex}, -1)" ${isFirst ? 'disabled' : ''} style="padding:2px 8px">↑</button>
+                            <button class="btn-sm" onclick="moveExercise(${dayIndex}, ${exIndex}, 1)" ${isLast ? 'disabled' : ''} style="padding:2px 8px">↓</button>
+                            <button class="btn-sm" onclick="showHistory('${ex.name.replace(/'/g, "\\'")}')">History</button>
+                            <button class="btn-danger btn-sm" onclick="removeExercise(${dayIndex}, ${exIndex})">X</button>
+                        </div>
                     </div>
                     
                     <div class="prev-week-stats ${prevStats ? 'visible' : ''}">
@@ -352,6 +452,20 @@
         data.weeks[currentWeekIndex].days[dIdx].exercises.splice(eIdx, 1);
         save(); render();
     }
+    
+    function moveExercise(dIdx, eIdx, direction) {
+        const exercises = data.weeks[currentWeekIndex].days[dIdx].exercises;
+        // Bounds check
+        if (eIdx + direction < 0 || eIdx + direction >= exercises.length) return;
+        
+        // Swap
+        const temp = exercises[eIdx];
+        exercises[eIdx] = exercises[eIdx + direction];
+        exercises[eIdx + direction] = temp;
+        
+        save();
+        render();
+    }
 
     function updateExerciseName(dIdx, eIdx, val) {
         data.weeks[currentWeekIndex].days[dIdx].exercises[eIdx].name = val;
@@ -418,17 +532,8 @@
         modal.classList.add('active');
     }
 
-    function closeModal() {
-        document.getElementById('historyModal').classList.remove('active');
-    }
-
-    function exportData() {
-        const blob = new Blob([JSON.stringify(data, null, 2)], {type : 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'workout_backup.json';
-        a.click();
+    function closeModal(id) {
+        document.getElementById(id).classList.remove('active');
     }
 
     function hardReset() {
